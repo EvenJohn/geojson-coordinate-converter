@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GeoJSON坐标转换器</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/vue@3.2.47/dist/vue.global.prod.js"></script>
+  
+  <!-- Tailwind 配置 -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#3b82f6',
+            secondary: '#10b981',
+            neutral: '#f3f4f6',
+            dark: '#1f2937',
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+          },
+        },
+      }
+    }
+  </script>
+  
+  <style type="text/tailwindcss">
+    @layer utilities {
+      .content-auto {
+        content-visibility: auto;
+      }
+      .file-input-label {
+        @apply cursor-pointer transition-all duration-300 hover:bg-primary/90 active:scale-95;
+      }
+      .card-shadow {
+        @apply shadow-lg hover:shadow-xl transition-shadow duration-300;
+      }
+      .btn-effect {
+        @apply transition-all duration-300 hover:shadow-md active:scale-95;
+      }
+    }
+  </style>
+</head>
+<body class="bg-gray-50 font-sans text-gray-800 min-h-screen flex flex-col">
+  <header class="bg-gradient-to-r from-primary to-secondary text-white py-6 shadow-md">
+    <div class="container mx-auto px-4">
+      <h1 class="text-[clamp(1.8rem,3vw,2.5rem)] font-bold flex items-center">
+        <i class="fa fa-map-marker mr-3"></i>GeoJSON坐标转换器
+      </h1>
+      <p class="mt-2 text-gray-100">轻松转换WGS84、GCJ02和BD09坐标系之间的GeoJSON数据</p>
+    </div>
+  </header>
+
+  <main class="flex-grow container mx-auto px-4 py-8">
+    <div class="max-w-4xl mx-auto">
+      <!-- 上传区域 -->
+      <section class="mb-10">
+        <div class="bg-white rounded-xl p-6 card-shadow">
+          <h2 class="text-xl font-semibold mb-4 flex items-center">
+            <i class="fa fa-upload text-primary mr-2"></i>上传GeoJSON文件
+          </h2>
+          
+          <div class="flex flex-col md:flex-row gap-6 items-center">
+            <div class="w-full md:w-3/4">
+              <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-primary transition-colors duration-300">
+                <input 
+                  type="file" 
+                  id="fileInput" 
+                  accept=".geojson,.json" 
+                  class="hidden"
+                  @change="handleFileChange"
+                />
+                <label for="fileInput" class="file-input-label block">
+                  <i class="fa fa-cloud-upload text-3xl text-primary mb-3"></i>
+                  <p class="text-lg font-medium">拖放文件到此处或点击上传</p>
+                  <p class="text-sm text-gray-500 mt-1">支持 .geojson 或 .json 格式</p>
+                </label>
+              </div>
+            </div>
+            
+            <div class="w-full md:w-1/4">
+              <div class="bg-neutral rounded-lg p-4 h-full flex flex-col justify-between">
+                <div>
+                  <h3 class="font-medium text-gray-700 mb-2">文件信息</h3>
+                  <div class="space-y-2 text-sm">
+                    <p v-if="fileName"><i class="fa fa-file-text-o mr-1"></i> {{ fileName }}</p>
+                    <p v-if="fileSize"><i class="fa fa-info-circle mr-1"></i> {{ fileSize }}</p>
+                    <p v-if="featureCount"><i class="fa fa-list-ul mr-1"></i> {{ featureCount }} 个要素</p>
+                  </div>
+                </div>
+                
+                <button 
+                  v-if="fileName"
+                  @click="resetFile"
+                  class="mt-4 bg-gray-200 hover:bg-gray-300 text-gray-700 py-2 px-4 rounded-lg flex items-center justify-center btn-effect"
+                >
+                  <i class="fa fa-refresh mr-2"></i>重新选择
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      
+      <!-- 转换选项 -->
+      <section v-if="geojsonData" class="mb-10">
+        <div class="bg-white rounded-xl p-6 card-shadow">
+          <h2 class="text-xl font-semibold mb-6 flex items-center">
+            <i class="fa fa-exchange text-primary mr-2"></i>坐标转换设置
+          </h2>
+          
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="space-y-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">源坐标系</label>
+                <div class="relative">
+                  <select 
+                    v-model="sourceCoordSystem"
+                    class="w-full bg-gray-50 border border-gray-300 text-gray-700 py-3 px-4 pr-8 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary appearance-none"
+                  >
+                    <option value="wgs84">WGS84 (标准坐标系)</option>
+                    <option value="gcj02">GCJ02 (中国加密坐标系)</option>
+                    <option value="bd09">BD09 (百度坐标系)</option>
+                  </select>
+                  <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
+                    <i class="fa fa-chevron-down text-xs"></i>
+                  </div>
+                </div>
+              </div>
+              
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">目标坐标系</label>
+                <div class="relative">
+                  <select 
+                    v-model="targetCoordSystem"
+                    class="w-full bg-gray-50 border border-gray-300 text-gray-700 py-3 px-4 pr-8 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary appearance-none"
+                  >
+                    <option value="wgs84">WGS84 (标准坐标系)</option>
+                    <option value="gcj02">GCJ02 (中国加密坐标系)</option>
+                    <option value="bd09">BD09 (百度坐标系)</option>
+                  </select>
+                  <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
+                    <i class="fa fa-chevron-down text-xs"></i>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div class="flex flex-col justify-between">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">转换设置</label>
+                <div class="bg-gray-50 p-4 rounded-lg space-y-3">
+                  <div class="flex items-center">
+                    <input 
+                      type="checkbox" 
+                      id="processAllFeatures" 
+                      v-model="processAllFeatures"
+                      class="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded"
+                    >
+                    <label for="processAllFeatures" class="ml-2 block text-sm text-gray-700">
+                      处理所有几何类型
+                    </label>
+                  </div>
+                  
+                  <div class="flex items-center">
+                    <input 
+                      type="checkbox" 
+                      id="preserveProperties" 
+                      v-model="preserveProperties"
+                      class="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded"
+                    >
+                    <label for="preserveProperties" class="ml-2 block text-sm text-gray-700">
+                      保留原始属性
+                    </label>
+                  </div>
+                  
+                  <div class="flex items-center">
+                    <input 
+                      type="checkbox" 
+                      id="addConversionInfo" 
+                      v-model="addConversionInfo"
+                      class="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded"
+                    >
+                    <label for="addConversionInfo" class="ml-2 block text-sm text-gray-700">
+                      添加转换信息
+                    </label>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="mt-4">
+                <button 
+                  @click="convertCoordinates"
+                  :disabled="sourceCoordSystem === targetCoordSystem || isConverting"
+                  class="w-full bg-primary hover:bg-primary/90 text-white font-medium py-3 px-4 rounded-lg flex items-center justify-center btn-effect"
+                >
+                  <i class="fa fa-magic mr-2"></i>
+                  <span>{{ isConverting ? '转换中...' : '开始转换' }}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      
+      <!-- 转换结果 -->
+      <section v-if="convertedData" class="mb-10">
+        <div class="bg-white rounded-xl p-6 card-shadow">
+          <h2 class="text-xl font-semibold mb-4 flex items-center">
+            <i class="fa fa-check-circle text-secondary mr-2"></i>转换完成
+          </h2>
+          
+          <div class="bg-gray-50 p-4 rounded-lg mb-6">
+            <div class="flex flex-wrap gap-3 mb-3">
+              <span class="bg-primary/10 text-primary px-3 py-1 rounded-full text-sm">
+                <i class="fa fa-exchange mr-1"></i>从 {{ getCoordSystemName(sourceCoordSystem) }} 到 {{ getCoordSystemName(targetCoordSystem) }}
+              </span>
+              <span class="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-sm">
+                <i class="fa fa-clock-o mr-1"></i>{{ conversionTime }}
+              </span>
+              <span class="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-sm">
+                <i class="fa fa-cogs mr-1"></i>{{ featureCount }} 个要素已转换
+              </span>
+            </div>
+            
+            <div class="text-sm text-gray-600">
+              <p>转换后的GeoJSON文件已准备好下载。点击下方按钮下载转换后的文件。</p>
+            </div>
+          </div>
+          
+          <div class="flex flex-wrap gap-4">
+            <button 
+              @click="downloadConvertedFile"
+              class="bg-secondary hover:bg-secondary/90 text-white font-medium py-3 px-6 rounded-lg flex items-center btn-effect"
+            >
+              <i class="fa fa-download mr-2"></i>下载转换后的文件
+            </button>
+            
+            <button 
+              @click="resetConversion"
+              class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium py-3 px-6 rounded-lg flex items-center btn-effect"
+            >
+              <i class="fa fa-undo mr-2"></i>重新转换
+            </button>
+          </div>
+        </div>
+      </section>
+      
+      <!-- 错误信息 -->
+      <section v-if="errorMessage" class="mb-10">
+        <div class="bg-red-50 border border-red-200 rounded-xl p-6">
+          <h2 class="text-xl font-semibold mb-3 flex items-center text-red-600">
+            <i class="fa fa-exclamation-triangle mr-2"></i>错误
+          </h2>
+          <p class="text-red-600">{{ errorMessage }}</p>
+          <button 
+            @click="clearError"
+            class="mt-4 bg-red-100 hover:bg-red-200 text-red-600 py-2 px-4 rounded-lg flex items-center btn-effect"
+          >
+            <i class="fa fa-times mr-2"></i>关闭
+          </button>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="bg-dark text-white py-6">
+    <div class="container mx-auto px-4">
+      <div class="flex flex-col md:flex-row justify-between items-center">
+        <div class="mb-4 md:mb-0">
+          <p class="text-sm text-gray-400">GeoJSON坐标转换器 &copy; 2023</p>
+        </div>
+        <div class="flex space-x-4">
+          <a href="#" class="text-gray-400 hover:text-white transition-colors duration-300">
+            <i class="fa fa-github text-xl"></i>
+          </a>
+          <a href="#" class="text-gray-400 hover:text-white transition-colors duration-300">
+            <i class="fa fa-question-circle text-xl"></i>
+          </a>
+          <a href="#" class="text-gray-400 hover:text-white transition-colors duration-300">
+            <i class="fa fa-info-circle text-xl"></i>
+          </a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    const app = Vue.createApp({
+      data() {
+        return {
+          file: null,
+          fileName: '',
+          fileSize: '',
+          featureCount: 0,
+          geojsonData: null,
+          convertedData: null,
+          sourceCoordSystem: 'gcj02',
+          targetCoordSystem: 'wgs84',
+          processAllFeatures: true,
+          preserveProperties: true,
+          addConversionInfo: true,
+          isConverting: false,
+          conversionTime: '',
+          errorMessage: '',
+          showFileInfo: false
+        }
+      },
+      
+      methods: {
+        // 处理文件上传
+        handleFileChange(event) {
+          this.errorMessage = '';
+          this.convertedData = null;
+          
+          const files = event.target.files;
+          if (files.length === 0) return;
+          
+          const file = files[0];
+          if (!file.name.endsWith('.geojson') && !file.name.endsWith('.json')) {
+            this.errorMessage = '请上传.geojson或.json格式的文件';
+            return;
+          }
+          
+          this.file = file;
+          this.fileName = file.name;
+          this.fileSize = this.formatFileSize(file.size);
+          
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            try {
+              const data = JSON.parse(e.target.result);
+              
+              // 验证GeoJSON格式
+              if (!this.isValidGeoJSON(data)) {
+                this.errorMessage = '上传的文件不是有效的GeoJSON格式';
+                return;
+              }
+              
+              this.geojsonData = data;
+              this.featureCount = this.countFeatures(data);
+              this.showFileInfo = true;
+            } catch (error) {
+              this.errorMessage = '解析文件时出错: ' + error.message;
+            }
+          };
+          reader.onerror = () => {
+            this.errorMessage = '读取文件时出错';
+          };
+          reader.readAsText(file);
+        },
+        
+        // 重置文件
+        resetFile() {
+          this.file = null;
+          this.fileName = '';
+          this.fileSize = '';
+          this.featureCount = 0;
+          this.geojsonData = null;
+          this.convertedData = null;
+          this.errorMessage = '';
+          document.getElementById('fileInput').value = '';
+        },
+        
+        // 重置转换
+        resetConversion() {
+          this.convertedData = null;
+        },
+        
+        // 清除错误
+        clearError() {
+          this.errorMessage = '';
+        },
+        
+        // 验证GeoJSON格式
+        isValidGeoJSON(data) {
+          if (!data || typeof data !== 'object') return false;
+          if (data.type !== 'FeatureCollection' && data.type !== 'Feature') return false;
+          
+          // 简单验证，实际应用中可能需要更复杂的验证
+          return true;
+        },
+        
+        // 计算GeoJSON中的要素数量
+        countFeatures(data) {
+          if (data.type === 'FeatureCollection') {
+            return data.features.length;
+          } else if (data.type === 'Feature') {
+            return 1;
+          }
+          return 0;
+        },
+        
+        // 转换坐标
+        convertCoordinates() {
+          if (this.sourceCoordSystem === this.targetCoordSystem) {
+            this.errorMessage = '源坐标系和目标坐标系不能相同';
+            return;
+          }
+          
+          this.isConverting = true;
+          this.errorMessage = '';
+          
+          try {
+            // 记录转换开始时间
+            const startTime = performance.now();
+            
+            // 深拷贝原始数据，避免修改原始数据
+            const dataCopy = JSON.parse(JSON.stringify(this.geojsonData));
+            
+            // 根据GeoJSON类型处理坐标转换
+            if (dataCopy.type === 'FeatureCollection') {
+              dataCopy.features = dataCopy.features.map(feature => {
+                return this.processFeature(feature);
+              });
+            } else if (dataCopy.type === 'Feature') {
+              dataCopy = this.processFeature(dataCopy);
+            }
+            
+            // 添加转换信息
+            if (this.addConversionInfo) {
+              if (!dataCopy.properties) dataCopy.properties = {};
+              dataCopy.properties.conversionInfo = {
+                from: this.sourceCoordSystem,
+                to: this.targetCoordSystem,
+                timestamp: new Date().toISOString(),
+                tool: 'GeoJSON坐标转换器'
+              };
+            }
+            
+            // 记录转换结束时间
+            const endTime = performance.now();
+            this.conversionTime = ((endTime - startTime) / 1000).toFixed(2) + ' 秒';
+            
+            // 保存转换后的数据
+            this.convertedData = dataCopy;
+            
+          } catch (error) {
+            this.errorMessage = '转换坐标时出错: ' + error.message;
+          } finally {
+            this.isConverting = false;
+          }
+        },
+        
+        // 处理单个Feature
+        processFeature(feature) {
+          if (!feature.geometry) return feature;
+          
+          // 处理属性
+          const properties = this.preserveProperties ? feature.properties || {} : {};
+          
+          // 处理几何
+          const geometry = this.processGeometry(feature.geometry);
+          
+          return {
+            type: 'Feature',
+            properties,
+            geometry
+          };
+        },
+        
+        // 处理几何对象
+        processGeometry(geometry) {
+          if (!geometry || !geometry.coordinates) return geometry;
+          
+          const { type, coordinates } = geometry;
+          
+          // 根据几何类型处理坐标
+          switch (type) {
+            case 'Point':
+              return {
+                type,
+                coordinates: this.convertPoint(coordinates)
+              };
+              
+            case 'LineString':
+              return {
+                type,
+                coordinates: coordinates.map(point => this.convertPoint(point))
+              };
+              
+            case 'Polygon':
+              return {
+                type,
+                coordinates: coordinates.map(ring => 
+                  ring.map(point => this.convertPoint(point))
+                )
+              };
+              
+            case 'MultiPoint':
+              return {
+                type,
+                coordinates: coordinates.map(point => this.convertPoint(point))
+              };
+              
+            case 'MultiLineString':
+              return {
+                type,
+                coordinates: coordinates.map(line => 
+                  line.map(point => this.convertPoint(point))
+                )
+              };
+              
+            case 'MultiPolygon':
+              return {
+                type,
+                coordinates: coordinates.map(polygon => 
+                  polygon.map(ring => 
+                    ring.map(point => this.convertPoint(point))
+                  )
+                )
+              };
+              
+            case 'GeometryCollection':
+              return {
+                type,
+                geometries: coordinates.map(geom => this.processGeometry(geom))
+              };
+              
+            default:
+              // 如果不处理所有几何类型，则返回原始几何
+              if (!this.processAllFeatures) return geometry;
+              return geometry;
+          }
+        },
+        
+        // 转换单个点坐标
+        convertPoint(coordinates) {
+          // 确保坐标是数组且至少有两个元素
+          if (!Array.isArray(coordinates) || coordinates.length < 2) return coordinates;
+          
+          const lng = coordinates[0];
+          const lat = coordinates[1];
+          
+          // 根据源坐标系和目标坐标系进行转换
+          if (this.sourceCoordSystem === 'wgs84') {
+            if (this.targetCoordSystem === 'gcj02') {
+              return this.wgs84ToGcj02(lng, lat);
+            } else if (this.targetCoordSystem === 'bd09') {
+              return this.wgs84ToBd09(lng, lat);
+            }
+          } else if (this.sourceCoordSystem === 'gcj02') {
+            if (this.targetCoordSystem === 'wgs84') {
+              return this.gcj02ToWgs84(lng, lat);
+            } else if (this.targetCoordSystem === 'bd09') {
+              return this.gcj02ToBd09(lng, lat);
+            }
+          } else if (this.sourceCoordSystem === 'bd09') {
+            if (this.targetCoordSystem === 'wgs84') {
+              return this.bd09ToWgs84(lng, lat);
+            } else if (this.targetCoordSystem === 'gcj02') {
+              return this.bd09ToGcj02(lng, lat);
+            }
+          }
+          
+          // 默认返回原始坐标
+          return coordinates;
+        },
+        
+        // 坐标转换算法 - WGS84转GCJ02
+        wgs84ToGcj02(lng, lat) {
+          // 判断是否在中国境内
+          if (!this.isInChina(lng, lat)) {
+            return [lng, lat];
+          }
+          
+          // 转换算法
+          const a = 6378245.0; // 长半轴
+          const ee = 0.00669342162296594323; // 偏心率平方
+          
+          let dLat = this.transformLat(lng - 105.0, lat - 35.0);
+          let dLng = this.transformLng(lng - 105.0, lat - 35.0);
+          
+          const radLat = lat / 180.0 * Math.PI;
+          let magic = Math.sin(radLat);
+          magic = 1 - ee * magic * magic;
+          
+          const sqrtMagic = Math.sqrt(magic);
+          dLat = (dLat * 180.0) / ((a * (1 - ee)) / (magic * sqrtMagic) * Math.PI);
+          dLng = (dLng * 180.0) / (a / sqrtMagic * Math.cos(radLat) * Math.PI);
+          
+          const mgLat = lat + dLat;
+          const mgLng = lng + dLng;
+          
+          return [mgLng, mgLat];
+        },
+        
+        // 坐标转换算法 - GCJ02转WGS84
+        gcj02ToWgs84(lng, lat) {
+          // 判断是否在中国境内
+          if (!this.isInChina(lng, lat)) {
+            return [lng, lat];
+          }
+          
+          // 转换算法
+          const a = 6378245.0; // 长半轴
+          const ee = 0.00669342162296594323; // 偏心率平方
+          
+          let dLat = this.transformLat(lng - 105.0, lat - 35.0);
+          let dLng = this.transformLng(lng - 105.0, lat - 35.0);
+          
+          const radLat = lat / 180.0 * Math.PI;
+          let magic = Math.sin(radLat);
+          magic = 1 - ee * magic * magic;
+          
+          const sqrtMagic = Math.sqrt(magic);
+          dLat = (dLat * 180.0) / ((a * (1 - ee)) / (magic * sqrtMagic) * Math.PI);
+          dLng = (dLng * 180.0) / (a / sqrtMagic * Math.cos(radLat) * Math.PI);
+          
+          const mgLat = lat + dLat;
+          const mgLng = lng + dLng;
+          
+          // 相减得到偏移量
+          const wgsLat = lat * 2 - mgLat;
+          const wgsLng = lng * 2 - mgLng;
+          
+          return [wgsLng, wgsLat];
+        },
+        
+        // 坐标转换算法 - GCJ02转BD09
+        gcj02ToBd09(lng, lat) {
+          const x = lng;
+          const y = lat;
+          const z = Math.sqrt(x * x + y * y) + 0.00002 * Math.sin(y * Math.PI * 3000.0 / 180.0);
+          const theta = Math.atan2(y, x) + 0.000003 * Math.cos(x * Math.PI * 3000.0 / 180.0);
+          const bdLng = z * Math.cos(theta) + 0.0065;
+          const bdLat = z * Math.sin(theta) + 0.006;
+          
+          return [bdLng, bdLat];
+        },
+        
+        // 坐标转换算法 - BD09转GCJ02
+        bd09ToGcj02(lng, lat) {
+          const x = lng - 0.0065;
+          const y = lat - 0.006;
+          const z = Math.sqrt(x * x + y * y) - 0.00002 * Math.sin(y * Math.PI * 3000.0 / 180.0);
+          const theta = Math.atan2(y, x) - 0.000003 * Math.cos(x * Math.PI * 3000.0 / 180.0);
+          const gcjLng = z * Math.cos(theta);
+          const gcjLat = z * Math.sin(theta);
+          
+          return [gcjLng, gcjLat];
+        },
+        
+        // 坐标转换算法 - WGS84转BD09
+        wgs84ToBd09(lng, lat) {
+          const gcj = this.wgs84ToGcj02(lng, lat);
+          return this.gcj02ToBd09(gcj[0], gcj[1]);
+        },
+        
+        // 坐标转换算法 - BD09转WGS84
+        bd09ToWgs84(lng, lat) {
+          const gcj = this.bd09ToGcj02(lng, lat);
+          return this.gcj02ToWgs84(gcj[0], gcj[1]);
+        },
+        
+        // 辅助函数 - 判断是否在中国境内
+        isInChina(lng, lat) {
+          // 中国境内的大致范围
+          return (lng > 73.66 && lng < 135.05 && lat > 3.86 && lat < 53.55);
+        },
+        
+        // 辅助函数 - 纬度转换
+        transformLat(x, y) {
+          let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+          ret += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0 / 3.0;
+          ret += (20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin(y / 3.0 * Math.PI)) * 2.0 / 3.0;
+          ret += (160.0 * Math.sin(y / 12.0 * Math.PI) + 320 * Math.sin(y * Math.PI / 30.0)) * 2.0 / 3.0;
+          return ret;
+        },
+        
+        // 辅助函数 - 经度转换
+        transformLng(x, y) {
+          let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+          ret += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0 / 3.0;
+          ret += (20.0 * Math.sin(x * Math.PI) + 40.0 * Math.sin(x / 3.0 * Math.PI)) * 2.0 / 3.0;
+          ret += (150.0 * Math.sin(x / 12.0 * Math.PI) + 300.0 * Math.sin(x / 30.0 * Math.PI)) * 2.0 / 3.0;
+          return ret;
+        },
+        
+        // 格式化文件大小
+        formatFileSize(bytes) {
+          if (bytes === 0) return '0 Bytes';
+          
+          const k = 1024;
+          const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+          const i = Math.floor(Math.log(bytes) / Math.log(k));
+          
+          return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        },
+        
+        // 下载转换后的文件
+        downloadConvertedFile() {
+          if (!this.convertedData) return;
+          
+          const jsonStr = JSON.stringify(this.convertedData, null, 2);
+          const blob = new Blob([jsonStr], { type: 'application/json' });
+          
+          // 创建下载链接
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          
+          // 生成文件名
+          const fileName = this.fileName.replace(/(\.geojson|\.json)$/, '') + 
+                          `_${this.sourceCoordSystem}_to_${this.targetCoordSystem}.geojson`;
+          a.download = fileName;
+          
+          // 触发下载
+          document.body.appendChild(a);
+          a.click();
+          
+          // 清理
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        },
+        
+        // 获取坐标系名称
+        getCoordSystemName(code) {
+          switch (code) {
+            case 'wgs84': return 'WGS84 (标准坐标系)';
+            case 'gcj02': return 'GCJ02 (中国加密坐标系)';
+            case 'bd09': return 'BD09 (百度坐标系)';
+            default: return code;
+          }
+        }
+      }
+    });
+    
+    app.mount('body');
+  </script>
+</body>
+</html>
